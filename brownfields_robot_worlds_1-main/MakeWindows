@@ -1,0 +1,63 @@
+# Robot Worlds Makefile - Windows Compatible Version
+PROJECT_DIR := .
+REFERENCE_SERVER := $(PROJECT_DIR)\libs\reference-server-0.1.0.jar
+SERVER_SOURCE := $(PROJECT_DIR)\src\main\java\za\co\wethinkcode\server\RobotWorldServer.java
+PORT := 5000
+
+# Version detection
+VERSION := $(shell mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+RELEASE_VERSION := $(subst -SNAPSHOT,,$(VERSION))
+CLEAN_VERSION := $(shell echo $(VERSION) | sed 's/-SNAPSHOT//')
+
+.PHONY: all compile test test-reference test-local package release release-build clean
+
+all: compile test package
+
+compile:
+	@echo Compiling project...
+	@mvn compile
+
+test-unit: compile
+	@echo Running unit tests...
+	@mvn -Dtest=!LaunchRobotTests test
+
+test-reference: compile
+	@echo === Testing against Reference Implementation ===
+	@echo Starting reference server...
+	@start /B java -jar $(REFERENCE_SERVER)
+	@timeout /t 5 /nobreak >nul
+	@echo Running acceptance tests...
+	@mvn -Dtest=!RobotMovementTests test -Dserver.url=http://localhost:$(PORT)
+	@taskkill /f /im java.exe >nul 2>&1
+
+test-local: compile
+	@echo === Testing Against Your Implementation ===
+	@echo Building and starting your server...
+	@start /B mvn exec:java -Dexec.mainClass="za.co.wethinkcode.server.RobotWorldServer"
+	@timeout /t 5 /nobreak >nul
+	@echo Running acceptance tests...
+	@mvn test -Dserver.url=http://localhost:$(PORT)
+	@taskkill /f /im java.exe >nul 2>&1
+
+test: test-unit test-reference test-local
+
+package: compile
+	@echo Packaging application...
+	@mvn package -DskipTests
+	@echo JAR created: target\robot-world-$(VERSION).jar
+
+release-build:
+	@echo Preparing release build...
+	@mvn versions:set -DnewVersion=$(RELEASE_VERSION) -DgenerateBackupPoms=false
+	@echo Version updated to $(RELEASE_VERSION)
+
+release: release-build test package
+	@echo Creating release tag...
+	@git tag -a "v$(RELEASE_VERSION)" -m "Release v$(RELEASE_VERSION)"
+	@git push origin "v$(RELEASE_VERSION)"
+	@echo === Release $(RELEASE_VERSION) successfully created ===
+	@echo Release JAR: target\robot-world-$(RELEASE_VERSION).jar
+
+clean:
+	@echo Cleaning project...
+	@mvn clean

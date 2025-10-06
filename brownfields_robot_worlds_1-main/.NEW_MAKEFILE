@@ -1,0 +1,79 @@
+# Robot Worlds Makefile - Improved Strictly Compliant Version
+
+PROJECT_DIR := .
+REFERENCE_SERVER := $(PROJECT_DIR)/libs/reference-server-0.1.0.jar
+SERVER_SOURCE := $(PROJECT_DIR)/src/main/java/za/co/wethinkcode/server/RobotWorldServer.java
+PORT := 5000
+
+# Version detection
+VERSION := $(shell mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+RELEASE_VERSION := $(subst -SNAPSHOT,,$(VERSION))
+
+.PHONY: all compile test test-unit test-reference test-local package release release-build clean install copy-dependencies
+
+all: compile test package
+
+compile:
+	@echo "Compiling project..."
+	@mvn compile
+
+install:
+	@echo "Installing to local repository..."
+	@mvn install
+
+copy-dependencies:
+	@echo "Copying runtime dependencies..."
+	@mvn dependency:copy-dependencies
+
+test-unit: compile
+	@echo "Running unit tests..."
+	@mvn test
+
+test-reference: compile
+	@echo "=== Testing against Reference Implementation ==="
+	@echo "Starting reference server..."
+	@java -jar $(REFERENCE_SERVER) & \
+	SERVER_PID=$$!; \
+	trap "kill -9 $$SERVER_PID" EXIT; \
+	sleep 5; \
+	echo "Running acceptance tests..."; \
+	mvn test -Dserver.url=http://localhost:$(PORT); \
+	TEST_RESULT=$$?; \
+	kill -9 $$SERVER_PID; \
+	exit $$TEST_RESULT
+
+test-local: compile copy-dependencies
+	@echo "=== Testing Against Your Implementation ==="
+	@echo "Building and starting your server..."
+	@mvn package -DskipTests
+	@java -cp target/classes:target/dependency/* za.co.wethinkcode.server.RobotWorldServer & \
+	SERVER_PID=$$!; \
+	trap "kill -9 $$SERVER_PID" EXIT; \
+	sleep 5; \
+	echo "Running acceptance tests..."; \
+	mvn test -Dserver.url=http://localhost:$(PORT); \
+	TEST_RESULT=$$?; \
+	kill -9 $$SERVER_PID; \
+	exit $$TEST_RESULT
+
+test: test-unit test-reference test-local
+
+package: compile
+	@echo "Packaging application..."
+	@mvn package
+	@echo "JAR created: target/robot-world-$(VERSION).jar"
+
+release-build:
+	@echo "Preparing release build..."
+	@sed -i 's/<version>$(VERSION)<\/version>/<version>$(RELEASE_VERSION)<\/version>/' pom.xml
+	@echo "Version updated to $(RELEASE_VERSION)"
+
+release: release-build test package
+	@echo "Creating release tag..."
+	@git tag -a release-$(RELEASE_VERSION) -m "Release version $(RELEASE_VERSION)"
+	@echo "=== Release $(RELEASE_VERSION) successfully created ==="
+	@echo "Release JAR: target/robot-world-$(RELEASE_VERSION).jar"
+
+clean:
+	@echo "Cleaning project..."
+	@mvn clean
