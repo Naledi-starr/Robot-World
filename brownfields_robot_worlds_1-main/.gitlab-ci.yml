@@ -1,0 +1,100 @@
+stages:
+  - build
+  - test
+  - package
+  - deploy
+
+#workflow:
+#  rules:
+#    - if '$CI_COMMIT_BRANCH == "main"'
+
+default:
+  image: maven:3.9.8-eclipse-temurin-21
+  before_script:
+    - echo "Hello, from GroupJHB26!"
+    - git config --global user.email "kamogotjhb024@student.wethinkcode.co.za"
+    - apt-get update && apt-get install -y make
+
+variables:
+  IMAGE_NAME : robot-world
+  IMAGE_TAG : 0.0.4-snapshot
+  PORT : "5000"
+
+build-job:
+  inherit:
+    default: [image, before_script]
+  stage: build
+  script:
+    - echo "Compiling our project..."
+    - make clean
+    - make compile
+  artifacts:
+    paths:
+      - target/
+
+test-our-server:
+  inherit:
+    default: true
+  stage: test
+  retry: 1 # this is in case RobotMovementTests fails
+  script:
+    - echo "Starting server in the back..."
+    - make test-local
+  artifacts:
+    reports:
+      junit: target/surefire-reports/TEST-*.xml
+    paths:
+      - target/surefire-reports/
+
+test-ref-server:
+  inherit:
+    default: [image, before_script]
+  stage: test
+  needs:
+    - test-our-server
+  script:
+    - echo "=== TESTING FIRST REF-SERVER ==="
+    - make test-reference
+  artifacts:
+    reports:
+      junit: target/surefire-reports/TEST-*.xml
+    paths:
+      - target/surefire-reports/
+
+test-second-ref-server:
+  inherit:
+    default: [image, before_script]
+  stage: test
+  needs:
+    - test-ref-server
+  script:
+    - echo "=== TESTING SECOND REF-SERVER ==="
+    - make test-second-reference
+  artifacts:
+    reports:
+      junit: target/surefire-reports/TEST-*.xml
+    paths:
+      - target/surefire-reports/
+
+package_job:
+  stage: package
+  inherit:
+    default: [image, before_script]
+  script:
+    - make package
+  artifacts:
+    paths:
+      - target/*.jar
+
+deploy-prod:
+  stage: deploy
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - apk update
+    - apk add make maven openjdk21
+  script:
+    - echo "Pushing Docker containers..."
+    - make docker-push
+  environment: production
